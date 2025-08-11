@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "freshspark"
+version = "0.1.0"
+description = "Create truly fresh local Spark sessions with isolated temp dirs and reliable teardown."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+keywords = ["pyspark", "spark", "spark-session", "spark local", "spark cleanup"]
+authors = [{ name = "Odos Matthews" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: Apache Software License",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries",
+]
+
+dependencies = [
+  "pyspark>=3.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/eddiethedean/freshspark"
+Issues = "https://github.com/eddiethedean/freshspark/issues"
+
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["freshspark*"]
+
+[tool.setuptools.package-data]
+freshspark = ["py.typed"]
+
+[project.scripts]
+freshspark = "freshspark.__main__:main"

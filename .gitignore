@@ -1,0 +1,67 @@
+# --- OS / Editor cruft ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# --- Python build artifacts ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+wheelhouse/
+
+# --- Virtualenvs & env files ---
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.tox/
+.nox/
+
+# --- Type checkers / linters / caches ---
+.mypy_cache/
+.pytype/
+.ruff_cache/
+.cache/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Spark / Hadoop local artifacts ---
+metastore_db/
+derby.log
+spark-warehouse/
+.sparkStaging/
+# Sometimes Spark drops temp work dirs in CWD:
+*.crc
+_PARTIAL*
+_SUCCESS
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Misc ---
+*.bak
+*.tmp
