@@ -88,15 +88,19 @@ def _check_java_support(soft: bool = False) -> tuple[bool, str]:
     ok_set = _supported_java_for_pyspark(py_major, py_minor)
     j = _detect_java_major()
     if j is None:
-        msg = ("Java not found on PATH; Spark may fail to launch. "
-               "Install a supported JDK (Spark 3.x: 8/11/17; Spark 3.5+: also 21; Spark 4.x: 17/21).")
+        msg = (
+            "Java not found on PATH; Spark may fail to launch. "
+            "Install a supported JDK (Spark 3.x: 8/11/17; Spark 3.5+: also 21; Spark 4.x: 17/21)."
+        )
         if soft:
             warnings.warn(f"[freshspark] {msg}", stacklevel=2)
             return True, msg
         return True, msg  # don't block; Spark will error more specifically later
     if j not in ok_set:
-        msg = (f"Detected Java {j}, but PySpark/Spark {py_major}.x supports {sorted(ok_set)}. "
-               "Please install/switch JAVA_HOME to a supported JDK.")
+        msg = (
+            f"Detected Java {j}, but PySpark/Spark {py_major}.x supports {sorted(ok_set)}. "
+            "Please install/switch JAVA_HOME to a supported JDK."
+        )
         if soft or os.getenv("FRESHSPARK_SKIP_JAVA_CHECK", "").lower() in {"1", "true", "yes"}:
             warnings.warn(f"[freshspark] {msg}", stacklevel=2)
             return False, msg
@@ -137,10 +141,10 @@ class FreshConfig:
     app_name: str = "freshspark"
     master: str = "local[*]"
     enable_ui: bool = True
-    preset: str = "dev"               # one of: tiny, dev, fat
+    preset: str = "dev"  # one of: tiny, dev, fat
     reuse_within_process: bool = False
-    print_ui_url: bool = True         # print the UI URL once the session is up
-    hive_metastore: bool = False      # False => fully in-memory catalog; no Derby at all
+    print_ui_url: bool = True  # print the UI URL once the session is up
+    hive_metastore: bool = False  # False => fully in-memory catalog; no Derby at all
     extra_confs: dict[str, str] | None = None
 
 
@@ -249,8 +253,7 @@ def _builder_from_config(cfg: FreshConfig, warehouse: str, metastore: str) -> Sp
         )
     preset = _PRESETS.get(cfg.preset, {})
     b = (
-        SparkSession.builder
-        .appName(f"{cfg.app_name}_{os.getpid()}_{int(time.time() * 1000)}")
+        SparkSession.builder.appName(f"{cfg.app_name}_{os.getpid()}_{int(time.time() * 1000)}")
         .master(cfg.master)
         # 0 = pick a free port; keep UI optional
         .config("spark.ui.port", "0" if cfg.enable_ui else "0")
@@ -267,15 +270,13 @@ def _builder_from_config(cfg: FreshConfig, warehouse: str, metastore: str) -> Sp
     # Catalog / metastore behavior
     if cfg.hive_metastore:
         # Isolated Derby in a temp dir (no locks in CWD)
-        b = (
-            b.config("spark.sql.warehouse.dir", warehouse)
-             .config("spark.driver.extraJavaOptions", derby_java_opt)
+        b = b.config("spark.sql.warehouse.dir", warehouse).config(
+            "spark.driver.extraJavaOptions", derby_java_opt
         )
     else:
         # Fully in-memory catalog; avoids Derby entirely
-        b = (
-            b.config("spark.sql.catalogImplementation", "in-memory")
-             .config("spark.sql.warehouse.dir", warehouse)
+        b = b.config("spark.sql.catalogImplementation", "in-memory").config(
+            "spark.sql.warehouse.dir", warehouse
         )
 
     # Apply preset + extras (allow user to override anything)
@@ -488,11 +489,14 @@ def ensure_fresh(
     def job(path: str, *, spark):
         return spark.read.csv(path, header=True).count()
     """
+
     def _wrap(fn):
         @functools.wraps(fn)
         def _inner(*args, **kwargs):
             if "spark" in kwargs:
-                raise TypeError("ensure_fresh: pass no 'spark' kwarg; it is injected by the decorator.")
+                raise TypeError(
+                    "ensure_fresh: pass no 'spark' kwarg; it is injected by the decorator."
+                )
             with fresh_local_spark(
                 app_name=app_name,
                 preset=preset,
@@ -503,5 +507,7 @@ def ensure_fresh(
             ) as spark:
                 kwargs["spark"] = spark
                 return fn(*args, **kwargs)
+
         return _inner
+
     return _wrap

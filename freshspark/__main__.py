@@ -42,10 +42,18 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="freshspark", description="Fresh local Spark utilities")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_repl = sub.add_parser("repl", help="Start a Python REPL with a fresh local SparkSession bound to `spark`")
-    p_repl.add_argument("--app-name", default="freshspark", help="Application name (default: freshspark)")
-    p_repl.add_argument("--preset", choices=["tiny", "dev", "fat"], default="dev", help="Memory preset")
-    p_repl.add_argument("--hive", action="store_true", help="Use isolated embedded Derby metastore (off by default)")
+    p_repl = sub.add_parser(
+        "repl", help="Start a Python REPL with a fresh local SparkSession bound to `spark`"
+    )
+    p_repl.add_argument(
+        "--app-name", default="freshspark", help="Application name (default: freshspark)"
+    )
+    p_repl.add_argument(
+        "--preset", choices=["tiny", "dev", "fat"], default="dev", help="Memory preset"
+    )
+    p_repl.add_argument(
+        "--hive", action="store_true", help="Use isolated embedded Derby metastore (off by default)"
+    )
     p_repl.add_argument("--no-ui", action="store_true", help="Disable Spark UI")
     p_repl.set_defaults(func=cmd_repl)
 

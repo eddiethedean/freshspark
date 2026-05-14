@@ -58,11 +58,14 @@ def test_manual_lifecycle_and_cleanup():
     assert reset_active_session() is None  # idempotent no-op
 
 
-@pytest.mark.parametrize("preset,mem,maxres", [
-    ("tiny", "1g", "512m"),
-    ("dev",  "2g", "1g"),
-    ("fat",  "4g", "2g"),
-])
+@pytest.mark.parametrize(
+    "preset,mem,maxres",
+    [
+        ("tiny", "1g", "512m"),
+        ("dev", "2g", "1g"),
+        ("fat", "4g", "2g"),
+    ],
+)
 def test_presets_apply_memory_defaults(preset, mem, maxres):
     with fresh_local_spark(app_name=f"mem_{preset}", preset=preset) as spark:
         conf = spark.sparkContext.getConf()
@@ -151,13 +154,15 @@ def test_decorator_runs_and_cleans_up():
 
     assert job(7) == 7
     # After decorator returns, there should be no active session
-    assert SparkSession.getActiveSession() is None  # type: ignore[name-defined]
+    assert SparkSession.getActiveSession() is None
 
 
 def test_reuse_within_process_returns_same_instance():
     s1, cleanup1 = get_fresh_local_spark(app_name="reuse", preset="tiny", reuse_within_process=True)
     try:
-        s2, cleanup2 = get_fresh_local_spark(app_name="reuse", preset="tiny", reuse_within_process=True)
+        s2, cleanup2 = get_fresh_local_spark(
+            app_name="reuse", preset="tiny", reuse_within_process=True
+        )
         assert s1 is s2
         assert s1.range(1).count() == 1
     finally:
@@ -171,7 +176,9 @@ def test_reuse_after_cleanup_should_build_new_session():
     app_id_1 = s1.sparkContext.applicationId
     cleanup()
     # With reuse enabled and same app_name, we expect a *new* session after cleanup
-    s2, cleanup2 = get_fresh_local_spark(app_name="reuse2", preset="tiny", reuse_within_process=True)
+    s2, cleanup2 = get_fresh_local_spark(
+        app_name="reuse2", preset="tiny", reuse_within_process=True
+    )
     app_id_2 = s2.sparkContext.applicationId
     try:
         assert app_id_2 != app_id_1
@@ -183,7 +190,9 @@ def test_reuse_after_reset_active_session_rebuilds():
     s1, c1 = get_fresh_local_spark(app_name="reuse_reset", preset="tiny", reuse_within_process=True)
     assert s1.range(1).count() == 1
     reset_active_session()
-    s2, cleanup2 = get_fresh_local_spark(app_name="reuse_reset", preset="tiny", reuse_within_process=True)
+    s2, cleanup2 = get_fresh_local_spark(
+        app_name="reuse_reset", preset="tiny", reuse_within_process=True
+    )
     try:
         assert s2 is not s1
         assert s2.range(2).count() == 2
@@ -194,14 +203,20 @@ def test_reuse_after_reset_active_session_rebuilds():
 
 def test_reuse_swap_app_names_returns_fresh_session_for_first_app():
     s_a1, cleanup_a1 = get_fresh_local_spark(
-        app_name="reuse_swap_a", preset="tiny", reuse_within_process=True,
+        app_name="reuse_swap_a",
+        preset="tiny",
+        reuse_within_process=True,
     )
     assert s_a1.range(1).count() == 1
     _, cleanup_b = get_fresh_local_spark(
-        app_name="reuse_swap_b", preset="tiny", reuse_within_process=True,
+        app_name="reuse_swap_b",
+        preset="tiny",
+        reuse_within_process=True,
     )
     s_a2, cleanup_a2 = get_fresh_local_spark(
-        app_name="reuse_swap_a", preset="tiny", reuse_within_process=True,
+        app_name="reuse_swap_a",
+        preset="tiny",
+        reuse_within_process=True,
     )
     try:
         assert s_a2 is not s_a1

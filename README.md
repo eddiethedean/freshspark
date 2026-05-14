@@ -31,8 +31,10 @@ pip install freshspark
 
 ```bash
 pip install -e ".[dev]"
-pytest
+ruff format --check freshspark tests
 ruff check freshspark tests
+mypy freshspark tests
+pytest
 ```
 
 ---
