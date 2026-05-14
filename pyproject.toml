@@ -8,7 +8,8 @@ dynamic = ["version"]
 description = "Create truly fresh local Spark sessions with isolated temp dirs and reliable teardown."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 keywords = ["pyspark", "spark", "spark-session", "spark local", "spark cleanup"]
 authors = [{ name = "Odos Matthews" }]
 classifiers = [
@@ -19,7 +20,6 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "License :: OSI Approved :: Apache Software License",
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Topic :: Software Development :: Libraries",

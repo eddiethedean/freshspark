@@ -152,4 +152,4 @@ Local PySpark is great until it is not: JVMs that linger, Derby files under `cwd
 
 ## License
 
-Apache 2.0 (see [LICENSE](LICENSE)).
+SPDX **Apache-2.0** (full text in [LICENSE](https://github.com/eddiethedean/freshspark/blob/main/LICENSE)).
