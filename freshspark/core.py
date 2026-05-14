@@ -11,7 +11,7 @@ import time
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable
 
 from pyspark.sql import SparkSession
 
@@ -32,7 +32,7 @@ Key features:
 # Environment compatibility helpers
 # --------------------------------------------------------------------------------------
 
-def _detect_java_major() -> Optional[int]:
+def _detect_java_major() -> int | None:
     """
     Return Java major version (e.g., 8/11/17/21) or None if Java not found.
 
@@ -70,7 +70,7 @@ def _supported_java_for_pyspark(pyspark_major: int) -> set:
     return {17, 21} if pyspark_major >= 4 else {8, 11, 17}
 
 
-def _check_java_support(soft: bool = False) -> Tuple[bool, str]:
+def _check_java_support(soft: bool = False) -> tuple[bool, str]:
     """
     Verify current Java is supported by installed PySpark/Spark.
     If soft=True, only warn and return (ok, msg). If soft=False, raise on unsupported.
@@ -83,14 +83,14 @@ def _check_java_support(soft: bool = False) -> Tuple[bool, str]:
         msg = ("Java not found on PATH; Spark may fail to launch. "
                "Install a supported JDK (Spark 3.x: 8/11/17; Spark 4.x: 17/21).")
         if soft:
-            warnings.warn(f"[freshspark] {msg}")
+            warnings.warn(f"[freshspark] {msg}", stacklevel=2)
             return True, msg
         return True, msg  # don't block; Spark will error more specifically later
     if j not in ok_set:
         msg = (f"Detected Java {j}, but PySpark/Spark {py_major}.x supports {sorted(ok_set)}. "
                "Please install/switch JAVA_HOME to a supported JDK.")
         if soft or os.getenv("FRESHSPARK_SKIP_JAVA_CHECK", "").lower() in {"1", "true", "yes"}:
-            warnings.warn(f"[freshspark] {msg}")
+            warnings.warn(f"[freshspark] {msg}", stacklevel=2)
             return False, msg
         raise RuntimeError(msg)
     return True, f"Java {j} is supported for Spark {py_major}.x"
@@ -101,8 +101,8 @@ def _check_java_support(soft: bool = False) -> Tuple[bool, str]:
 # --------------------------------------------------------------------------------------
 
 # In-process cache so we can optionally reuse a fresh session within the same Python process.
-_ACTIVE: Dict[str, SparkSession] = {}
-_ACTIVE_CLEANUP: Dict[str, Callable[[], None]] = {}
+_ACTIVE: dict[str, SparkSession] = {}
+_ACTIVE_CLEANUP: dict[str, Callable[[], None]] = {}
 
 # Simple presets for user-friendly memory sizing & stability
 _PRESETS = {
@@ -133,14 +133,14 @@ class FreshConfig:
     reuse_within_process: bool = False
     print_ui_url: bool = True         # print the UI URL once the session is up
     hive_metastore: bool = False      # False => fully in-memory catalog; no Derby at all
-    extra_confs: Optional[Dict[str, str]] = None
+    extra_confs: dict[str, str] | None = None
 
 
 # --------------------------------------------------------------------------------------
 # Internals
 # --------------------------------------------------------------------------------------
 
-def _make_isolated_dirs(prefix: str = "spark_local_") -> Tuple[str, str, str]:
+def _make_isolated_dirs(prefix: str = "spark_local_") -> tuple[str, str, str]:
     """
     Create isolated temporary directories for this run:
     - run_tmp: root temp folder for all artifacts
@@ -258,7 +258,7 @@ def _make_cleanup(run_tmp: str, app_name: str, spark_ref: SparkSession) -> Calla
     return _cleanup
 
 
-def _build_fresh_session(cfg: FreshConfig) -> Tuple[SparkSession, Callable[[], None]]:
+def _build_fresh_session(cfg: FreshConfig) -> tuple[SparkSession, Callable[[], None]]:
     """
     Construct a SparkSession according to cfg, ensuring freshness and isolation.
     """
@@ -310,8 +310,8 @@ def get_fresh_local_spark(
     print_ui_url: bool = True,
     hive_metastore: bool = False,
     enable_ui: bool = True,
-    extra_confs: Optional[Dict[str, str]] = None,
-) -> Tuple[SparkSession, Callable[[], None]]:
+    extra_confs: dict[str, str] | None = None,
+) -> tuple[SparkSession, Callable[[], None]]:
     """
     Create a fresh local SparkSession and return (spark, cleanup_fn).
 
@@ -360,7 +360,7 @@ def fresh_local_spark(
     print_ui_url: bool = True,
     hive_metastore: bool = False,
     enable_ui: bool = True,
-    extra_confs: Optional[Dict[str, str]] = None,
+    extra_confs: dict[str, str] | None = None,
 ):
     """
     Context manager that yields a brand-new local SparkSession and guarantees cleanup.
@@ -388,7 +388,7 @@ def ensure_fresh(
     print_ui_url: bool = True,
     hive_metastore: bool = False,
     enable_ui: bool = True,
-    extra_confs: Optional[Dict[str, str]] = None,
+    extra_confs: dict[str, str] | None = None,
 ):
     """
     Decorator to run a function with a guaranteed fresh local Spark session.

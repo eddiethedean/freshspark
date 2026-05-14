@@ -1,14 +1,16 @@
 import os
 import time
-import pytest
-from pyspark.sql import SparkSession
+from urllib.parse import urlparse
 
+import pytest
 from freshspark import (
+    ensure_fresh,
     fresh_local_spark,
     get_fresh_local_spark,
     reset_active_session,
-    ensure_fresh,
 )
+from pyspark.sql import SparkSession
+
 
 def _warehouse_dir(spark):
     # Spark stores the effective value in SparkConf; try both
@@ -17,6 +19,15 @@ def _warehouse_dir(spark):
     except Exception:
         return spark.sparkContext.getConf().get("spark.sql.warehouse.dir")
 
+
+def _warehouse_filesystem_path(spark) -> str:
+    """Resolve warehouse dir to a host path (Spark 3.5+ may report a file: URI)."""
+    raw = _warehouse_dir(spark)
+    if raw.startswith("file:"):
+        return urlparse(raw).path
+    return raw
+
+
 def _driver_extra_javaopts(spark):
     return spark.sparkContext.getConf().get("spark.driver.extraJavaOptions", None)
 
@@ -24,7 +35,7 @@ def _driver_extra_javaopts(spark):
 def test_context_manager_creates_fresh_and_isolated():
     with fresh_local_spark(app_name="t1", preset="tiny") as s1:
         assert s1.range(3).count() == 3
-        w1 = _warehouse_dir(s1)
+        w1 = _warehouse_filesystem_path(s1)
         assert os.path.isabs(w1)
 
     # New session gets a different isolated warehouse
@@ -72,14 +83,15 @@ def test_default_in_memory_catalog_no_derby():
     with fresh_local_spark(app_name="nometa", hive_metastore=False, preset="tiny") as spark:
         # In-memory catalog selected
         assert spark.conf.get("spark.sql.catalogImplementation") == "in-memory"
-        # No Derby option set on driver when hive_metastore=False
-        assert _driver_extra_javaopts(spark) in (None, "")
+        # Spark may set default JVM flags; ensure we did not inject Derby.
+        javaopts = _driver_extra_javaopts(spark) or ""
+        assert "derby.system.home=" not in javaopts
 
 
 def test_hive_metastore_true_sets_derby_location():
     with fresh_local_spark(app_name="withmeta", hive_metastore=True, preset="tiny") as spark:
         # Warehouse directory exists and is isolated
-        w = _warehouse_dir(spark)
+        w = _warehouse_filesystem_path(spark)
         assert os.path.isabs(w)
         # Derby home is set via driver extraJavaOptions
         javaopts = _driver_extra_javaopts(spark)
@@ -137,7 +149,6 @@ def test_reuse_within_process_returns_same_instance():
         cleanup1()
 
 
-@pytest.mark.xfail(reason="Cache is not cleared on cleanup; consider clearing _ACTIVE on cleanup.")
 def test_reuse_after_cleanup_should_build_new_session():
     s1, cleanup = get_fresh_local_spark(app_name="reuse2", preset="tiny", reuse_within_process=True)
     app_id_1 = s1.sparkContext.applicationId

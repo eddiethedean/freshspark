@@ -2,8 +2,8 @@ import argparse
 import code
 import sys
 
+from . import __version__, reset_active_session
 from .core import get_fresh_local_spark
-from . import reset_active_session, __version__
 
 
 def cmd_repl(args):

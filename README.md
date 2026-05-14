@@ -8,9 +8,24 @@ Create **truly fresh** local Spark sessions with isolated temp dirs and reliable
 - Aggressively shuts down Py4J so the JVM actually exits
 - Simple API: context manager, `(spark, cleanup)` pair, decorator, and a tiny CLI
 
+## Requirements
+
+- Python 3.9 or newer
+- A supported JDK on `PATH` (Spark 3.x, the default dependency range: Java 8, 11, or 17)
+
+The package depends on **PySpark 3.5.x** (`pyspark>=3.5,<4`) for reliable local sessions. To experiment with Spark 4, install a matching `pyspark` 4.x build in the same environment (you may need a constraint override) and use a supported JDK (17 or 21).
+
 ## Install
 ```bash
 pip install freshspark
+```
+
+Development install (tests and lint):
+
+```bash
+pip install -e ".[dev]"
+pytest
+ruff check freshspark tests
 ```
 
 ## Quick start

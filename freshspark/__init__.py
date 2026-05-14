@@ -13,10 +13,10 @@ Public API:
 """
 
 from .core import (
+    ensure_fresh,
     fresh_local_spark,
     get_fresh_local_spark,
     reset_active_session,
-    ensure_fresh,
 )
 
 __all__ = [
@@ -26,4 +26,4 @@ __all__ = [
     "ensure_fresh",
 ]
 
-__version__ = '0.1.0'
+__version__ = "0.2.0"
