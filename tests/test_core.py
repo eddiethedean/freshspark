@@ -41,7 +41,7 @@ def test_context_manager_creates_fresh_and_isolated():
     # New session gets a different isolated warehouse
     with fresh_local_spark(app_name="t1", preset="tiny") as s2:
         assert s2.range(2).count() == 2
-        w2 = _warehouse_dir(s2)
+        w2 = _warehouse_filesystem_path(s2)
         assert w2 != w1
 
 
@@ -124,6 +124,23 @@ def test_rapid_create_stop_sequences_avoid_conflicts():
         time.sleep(0.05)
 
 
+def test_ensure_fresh_preserves_wrapped_metadata():
+    @ensure_fresh(app_name="meta_wrap", preset="tiny")
+    def labelled(x: int, *, spark):
+        return x
+
+    assert labelled.__name__ == "labelled"
+
+
+def test_ensure_fresh_rejects_explicit_spark_kwarg():
+    @ensure_fresh(app_name="no_spark_kw", preset="tiny")
+    def f(*, spark):
+        return 1
+
+    with pytest.raises(TypeError, match="ensure_fresh"):
+        f(spark=None)
+
+
 def test_decorator_runs_and_cleans_up():
     seen_app_ids = []
 
@@ -160,3 +177,55 @@ def test_reuse_after_cleanup_should_build_new_session():
         assert app_id_2 != app_id_1
     finally:
         cleanup2()
+
+
+def test_reuse_after_reset_active_session_rebuilds():
+    s1, c1 = get_fresh_local_spark(app_name="reuse_reset", preset="tiny", reuse_within_process=True)
+    assert s1.range(1).count() == 1
+    reset_active_session()
+    s2, cleanup2 = get_fresh_local_spark(app_name="reuse_reset", preset="tiny", reuse_within_process=True)
+    try:
+        assert s2 is not s1
+        assert s2.range(2).count() == 2
+    finally:
+        cleanup2()
+        c1()
+
+
+def test_reuse_swap_app_names_returns_fresh_session_for_first_app():
+    s_a1, cleanup_a1 = get_fresh_local_spark(
+        app_name="reuse_swap_a", preset="tiny", reuse_within_process=True,
+    )
+    assert s_a1.range(1).count() == 1
+    _, cleanup_b = get_fresh_local_spark(
+        app_name="reuse_swap_b", preset="tiny", reuse_within_process=True,
+    )
+    s_a2, cleanup_a2 = get_fresh_local_spark(
+        app_name="reuse_swap_a", preset="tiny", reuse_within_process=True,
+    )
+    try:
+        assert s_a2 is not s_a1
+        assert s_a2.range(3).count() == 3
+    finally:
+        cleanup_a2()
+        cleanup_b()
+        cleanup_a1()
+
+
+def test_hive_metastore_merges_extra_java_options_with_derby():
+    with fresh_local_spark(
+        app_name="merge_jvm",
+        hive_metastore=True,
+        preset="tiny",
+        extra_confs={"spark.driver.extraJavaOptions": "-Dfoo=bar"},
+    ) as spark:
+        opts = spark.sparkContext.getConf().get("spark.driver.extraJavaOptions", "")
+        assert "derby.system.home=" in opts
+        assert "-Dfoo=bar" in opts
+        assert opts.index("derby.system.home=") < opts.index("-Dfoo=bar")
+
+
+def test_unknown_preset_warns():
+    with pytest.warns(UserWarning, match=r"Unknown preset 'not_a_preset'"):
+        with fresh_local_spark(app_name="bad_preset", preset="not_a_preset") as s:
+            assert s.range(1).count() == 1

@@ -1,6 +1,13 @@
+"""Core utilities for fresh local Spark sessions with isolated temp dirs and teardown.
+
+Isolated warehouse (and optional Derby metastore), in-memory catalog by default,
+randomized UI port, optional in-process reuse, Py4J shutdown, and Java compatibility checks.
+"""
+
 from __future__ import annotations
 
 import atexit
+import functools
 import gc
 import os
 import re
@@ -15,34 +22,26 @@ from typing import Callable
 
 from pyspark.sql import SparkSession
 
-"""
-Core utilities for creating *fresh* local Spark sessions that don't clash with
-previous runs, and that shut down cleanly every time.
-
-Key features:
-- Isolated temp dirs per session (warehouse + optional Derby metastore)
-- In-memory catalog by default (no Derby locks)
-- Randomized UI port to avoid collisions
-- Optional reuse within the same Python process
-- Aggressive JVM/Py4J shutdown during cleanup
-- Java/PySpark compatibility check (fail-fast on unsupported JDKs)
-"""
-
 # --------------------------------------------------------------------------------------
 # Environment compatibility helpers
 # --------------------------------------------------------------------------------------
+
 
 def _detect_java_major() -> int | None:
     """
     Return Java major version (e.g., 8/11/17/21) or None if Java not found.
 
     Handles both "1.8.0_x" and "17.0.y" forms printed by `java -version`.
+    Note: `java -version` often exits with code 1 while still printing valid output;
+    we parse stderr/stdout and ignore returncode when text is present.
     """
     try:
         proc = subprocess.run(["java", "-version"], capture_output=True, text=True)
     except FileNotFoundError:
         return None
-    s = (proc.stderr or proc.stdout or "")
+    s = (proc.stderr or proc.stdout or "").strip()
+    if not s:
+        return None
     # Examples:
     #   openjdk version "1.8.0_402"
     #   openjdk version "17.0.11"
@@ -58,16 +57,25 @@ def _detect_java_major() -> int | None:
     return maj
 
 
-def _detect_pyspark_major() -> int:
+def _detect_pyspark_major_minor() -> tuple[int, int]:
     import pyspark  # local import to avoid hard dependency at import time
-    return int(pyspark.__version__.split(".", 1)[0])
+
+    parts = pyspark.__version__.split(".", 2)
+    major = int(parts[0])
+    minor = int(parts[1]) if len(parts) > 1 else 0
+    return major, minor
 
 
-def _supported_java_for_pyspark(pyspark_major: int) -> set:
+def _supported_java_for_pyspark(pyspark_major: int, pyspark_minor: int) -> set[int]:
     """
-    Spark 3.x supports Java 8/11/17; Spark 4.x supports Java 17/21.
+    Spark 4.x supports Java 17/21.
+    Spark 3.5+ commonly runs on Java 21 as well as 8/11/17; older 3.x lines follow upstream.
     """
-    return {17, 21} if pyspark_major >= 4 else {8, 11, 17}
+    if pyspark_major >= 4:
+        return {17, 21}
+    if pyspark_major == 3 and pyspark_minor >= 5:
+        return {8, 11, 17, 21}
+    return {8, 11, 17}
 
 
 def _check_java_support(soft: bool = False) -> tuple[bool, str]:
@@ -76,12 +84,12 @@ def _check_java_support(soft: bool = False) -> tuple[bool, str]:
     If soft=True, only warn and return (ok, msg). If soft=False, raise on unsupported.
     Honor FRESHSPARK_SKIP_JAVA_CHECK=1 to only warn.
     """
-    py_major = _detect_pyspark_major()
-    ok_set = _supported_java_for_pyspark(py_major)
+    py_major, py_minor = _detect_pyspark_major_minor()
+    ok_set = _supported_java_for_pyspark(py_major, py_minor)
     j = _detect_java_major()
     if j is None:
         msg = ("Java not found on PATH; Spark may fail to launch. "
-               "Install a supported JDK (Spark 3.x: 8/11/17; Spark 4.x: 17/21).")
+               "Install a supported JDK (Spark 3.x: 8/11/17; Spark 3.5+: also 21; Spark 4.x: 17/21).")
         if soft:
             warnings.warn(f"[freshspark] {msg}", stacklevel=2)
             return True, msg
@@ -105,7 +113,7 @@ _ACTIVE: dict[str, SparkSession] = {}
 _ACTIVE_CLEANUP: dict[str, Callable[[], None]] = {}
 
 # Simple presets for user-friendly memory sizing & stability
-_PRESETS = {
+_PRESETS: dict[str, dict[str, str]] = {
     # small notebooks, tiny ETL
     "tiny": {
         "spark.driver.memory": "1g",
@@ -139,6 +147,7 @@ class FreshConfig:
 # --------------------------------------------------------------------------------------
 # Internals
 # --------------------------------------------------------------------------------------
+
 
 def _make_isolated_dirs(prefix: str = "spark_local_") -> tuple[str, str, str]:
     """
@@ -175,20 +184,56 @@ def _shutdown_gateway(spark: SparkSession) -> None:
             pass
 
 
+def _reuse_session_is_dead(spark: SparkSession) -> bool:
+    """True if the session's SparkContext appears stopped (stale cache entry)."""
+    try:
+        sc = spark.sparkContext
+        jsc = getattr(sc, "_jsc", None)
+        return jsc is None
+    except Exception:
+        return True
+
+
+def _run_reuse_cleanup(app_name: str) -> None:
+    """Pop and invoke cleanup for a reuse cache key if present."""
+    c = _ACTIVE_CLEANUP.pop(app_name, None)
+    _ACTIVE.pop(app_name, None)
+    if c is not None:
+        c()
+
+
+def _evict_reuse_entries_for_session(session: SparkSession | None) -> None:
+    """Remove reuse cache entries pointing at this session object and run their cleanups."""
+    if session is None:
+        return
+    for key in [k for k, s in _ACTIVE.items() if s is session]:
+        _run_reuse_cleanup(key)
+
+
+def _evict_dead_reuse_entries() -> None:
+    """Remove reuse cache entries whose SparkSession is already stopped."""
+    for key in list(_ACTIVE.keys()):
+        s = _ACTIVE.get(key)
+        if s is not None and _reuse_session_is_dead(s):
+            _run_reuse_cleanup(key)
+
+
 def reset_active_session() -> None:
     """
     Stop any active SparkSession if present. Safe to call even if none exists.
     Also tries to shut down the Py4J gateway so the JVM exits.
+    Drops stale reuse cache entries so a subsequent reuse_within_process call
+    cannot return a stopped session.
     """
     prev = SparkSession.getActiveSession()
-    if prev is None:
-        return
-    try:
-        prev.stop()
-    except Exception:
-        pass
-    _shutdown_gateway(prev)
-    del prev
+    if prev is not None:
+        try:
+            prev.stop()
+        except Exception:
+            pass
+        _shutdown_gateway(prev)
+        _evict_reuse_entries_for_session(prev)
+    _evict_dead_reuse_entries()
     gc.collect()
 
 
@@ -196,6 +241,12 @@ def _builder_from_config(cfg: FreshConfig, warehouse: str, metastore: str) -> Sp
     """
     Build a SparkSession.Builder from our higher-level config.
     """
+    if cfg.preset not in _PRESETS:
+        warnings.warn(
+            f"[freshspark] Unknown preset {cfg.preset!r}; no preset memory settings applied. "
+            f"Use one of: {', '.join(sorted(_PRESETS))}.",
+            stacklevel=4,
+        )
     preset = _PRESETS.get(cfg.preset, {})
     b = (
         SparkSession.builder
@@ -211,12 +262,14 @@ def _builder_from_config(cfg: FreshConfig, warehouse: str, metastore: str) -> Sp
         .config("spark.driver.allowMultipleContexts", "false")
     )
 
+    derby_java_opt = f"-Dderby.system.home={metastore}"
+
     # Catalog / metastore behavior
     if cfg.hive_metastore:
         # Isolated Derby in a temp dir (no locks in CWD)
         b = (
             b.config("spark.sql.warehouse.dir", warehouse)
-             .config("spark.driver.extraJavaOptions", f"-Dderby.system.home={metastore}")
+             .config("spark.driver.extraJavaOptions", derby_java_opt)
         )
     else:
         # Fully in-memory catalog; avoids Derby entirely
@@ -230,20 +283,33 @@ def _builder_from_config(cfg: FreshConfig, warehouse: str, metastore: str) -> Sp
         b = b.config(k, v)
     if cfg.extra_confs:
         for k, v in cfg.extra_confs.items():
-            b = b.config(k, v)
+            if (
+                cfg.hive_metastore
+                and k == "spark.driver.extraJavaOptions"
+                and derby_java_opt not in v
+            ):
+                merged = f"{derby_java_opt} {v}".strip()
+                b = b.config(k, merged)
+            else:
+                b = b.config(k, v)
 
     return b
 
 
 def _make_cleanup(run_tmp: str, app_name: str, spark_ref: SparkSession) -> Callable[[], None]:
     """
-    Create a cleanup function that:
+    Create an idempotent cleanup function that:
     - Stops Spark
     - Shuts down the JVM gateway
     - Clears reuse caches for this app_name
     - Removes temp directories
     """
+    done: list[bool] = [False]
+
     def _cleanup() -> None:
+        if done[0]:
+            return
+        done[0] = True
         try:
             spark_ref.stop()
         except Exception:
@@ -255,7 +321,17 @@ def _make_cleanup(run_tmp: str, app_name: str, spark_ref: SparkSession) -> Calla
         # Encourage GC and remove temp dirs
         gc.collect()
         shutil.rmtree(run_tmp, ignore_errors=True)
+
     return _cleanup
+
+
+def _register_atexit(cleanup: Callable[[], None]) -> None:
+    """Register cleanup with atexit; cleanup is idempotent so duplicate runs are safe."""
+
+    def _guard() -> None:
+        cleanup()
+
+    atexit.register(_guard)
 
 
 def _build_fresh_session(cfg: FreshConfig) -> tuple[SparkSession, Callable[[], None]]:
@@ -265,9 +341,12 @@ def _build_fresh_session(cfg: FreshConfig) -> tuple[SparkSession, Callable[[], N
     # Fast fail / warn on unsupported Java
     _check_java_support(soft=False)
 
-    # If reuse is requested and we have a cached one, return it
+    # If reuse is requested and we have a cached one, return it (if still alive)
     if cfg.reuse_within_process and cfg.app_name in _ACTIVE:
-        return _ACTIVE[cfg.app_name], _ACTIVE_CLEANUP[cfg.app_name]
+        cached = _ACTIVE[cfg.app_name]
+        if not _reuse_session_is_dead(cached):
+            return cached, _ACTIVE_CLEANUP[cfg.app_name]
+        _run_reuse_cleanup(cfg.app_name)
 
     # Otherwise, stop any active session to avoid multiple contexts
     reset_active_session()
@@ -275,13 +354,17 @@ def _build_fresh_session(cfg: FreshConfig) -> tuple[SparkSession, Callable[[], N
     # Build a new isolated session
     run_tmp, warehouse, metastore = _make_isolated_dirs(prefix=f"{cfg.app_name}_")
     builder = _builder_from_config(cfg, warehouse, metastore)
-    spark = builder.getOrCreate()
+    try:
+        spark = builder.getOrCreate()
+    except Exception:
+        shutil.rmtree(run_tmp, ignore_errors=True)
+        raise
 
     # Build cleanup and register as atexit fallback
     cleanup = _make_cleanup(run_tmp, cfg.app_name, spark)
-    atexit.register(cleanup)
+    _register_atexit(cleanup)
 
-    # Optionally print the UI URL
+    # Optionally print the Spark UI URL
     if cfg.print_ui_url and cfg.enable_ui:
         try:
             ui = spark.sparkContext.uiWebUrl
@@ -302,6 +385,7 @@ def _build_fresh_session(cfg: FreshConfig) -> tuple[SparkSession, Callable[[], N
 # Public API
 # --------------------------------------------------------------------------------------
 
+
 def get_fresh_local_spark(
     app_name: str = "freshspark",
     *,
@@ -320,7 +404,8 @@ def get_fresh_local_spark(
     app_name : str
         Logical name for this session. Also used as cache key if reuse is enabled.
     preset : {"tiny","dev","fat"}
-        Memory convenience presets. Defaults to "dev".
+        Memory convenience presets. Defaults to "dev". Unknown names log a warning
+        and apply no preset memory keys.
     reuse_within_process : bool
         If True, subsequent calls in this process with the same app_name will
         return the same (isolated) session and cleanup function.
@@ -333,6 +418,8 @@ def get_fresh_local_spark(
         Enable the Spark web UI (on a random free port).
     extra_confs : dict
         Additional Spark configs to apply (can override presets/defaults).
+        With ``hive_metastore=True``, a user ``spark.driver.extraJavaOptions`` value
+        is merged after the required ``-Dderby.system.home=...`` flag so Derby is not dropped.
 
     Returns
     -------
@@ -392,7 +479,8 @@ def ensure_fresh(
 ):
     """
     Decorator to run a function with a guaranteed fresh local Spark session.
-    The function must accept a `spark` kwarg (will be injected).
+    The wrapped function must accept a ``spark`` keyword argument (injected here).
+    Passing ``spark=`` from the caller is not allowed.
 
     Example
     -------
@@ -401,7 +489,10 @@ def ensure_fresh(
         return spark.read.csv(path, header=True).count()
     """
     def _wrap(fn):
+        @functools.wraps(fn)
         def _inner(*args, **kwargs):
+            if "spark" in kwargs:
+                raise TypeError("ensure_fresh: pass no 'spark' kwarg; it is injected by the decorator.")
             with fresh_local_spark(
                 app_name=app_name,
                 preset=preset,

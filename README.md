@@ -11,7 +11,7 @@ Create **truly fresh** local Spark sessions with isolated temp dirs and reliable
 ## Requirements
 
 - Python 3.9 or newer
-- A supported JDK on `PATH` (Spark 3.x, the default dependency range: Java 8, 11, or 17)
+- A supported JDK on `PATH` (Spark 3.x line: Java 8, 11, or 17; PySpark 3.5+ also allows Java 21)
 
 The package depends on **PySpark 3.5.x** (`pyspark>=3.5,<4`) for reliable local sessions. To experiment with Spark 4, install a matching `pyspark` 4.x build in the same environment (you may need a constraint override) and use a supported JDK (17 or 21).
 
@@ -48,6 +48,7 @@ finally:
 
 - **Presets**: `preset="tiny" | "dev" | "fat"` set sane memory defaults.
 - **No Hive by default**: in-memory catalog avoids Derby locks. Enable with `hive_metastore=True` if you need it.
+- **Derby + extra JVM flags**: with `hive_metastore=True`, a custom `spark.driver.extraJavaOptions` in `extra_confs` is merged after the required `-Dderby.system.home=...` flag so Derby is not dropped.
 - **Clean UI**: UI port auto-randomized; prints the URL once up.
 - **Optional reuse (same process)**: `reuse_within_process=True` to keep one isolated session for repeated calls.
 - **Decorator**: run any function inside a fresh session:
